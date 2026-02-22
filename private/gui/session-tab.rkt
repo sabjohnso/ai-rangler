@@ -1,126 +1,91 @@
 #lang racket/base
 
 ;; Session tab — composes chat-view, input-area, and status-bar.
-;; A timer drains the session's event channel on the GUI thread
-;; and dispatches events to the appropriate widgets.
+;; Delegates event→command mapping to the controller; a local
+;; gui-presenter dispatches commands to the appropriate widgets.
 
 (require racket/class
          racket/gui/base
-         racket/async-channel
          "../session.rkt"
-         "../event.rkt"
+         "../presenter.rkt"
+         "../controller.rkt"
          "chat-view.rkt"
          "input-area.rkt"
          "status-bar.rkt")
 
 (provide session-tab%)
 
+;; ─── GUI presenter ──────────────────────────────────────────────────────────
+
+(struct gui-presenter (chat status input)
+  #:methods gen:presenter
+  [(define (present! self cmd)
+     (define chat   (gui-presenter-chat self))
+     (define status (gui-presenter-status self))
+     (define input  (gui-presenter-input self))
+     (cond
+       [(cmd:show-user-message? cmd)
+        (send chat append-user-message (cmd:show-user-message-text cmd))]
+       [(cmd:begin-assistant-message? cmd)
+        (send chat begin-assistant-message)]
+       [(cmd:append-assistant-text? cmd)
+        (send chat append-assistant-text (cmd:append-assistant-text-text cmd))]
+       [(cmd:show-tool-notification? cmd)
+        (send chat append-tool-notification
+              (cmd:show-tool-notification-tool-name cmd)
+              (cmd:show-tool-notification-action cmd))]
+       [(cmd:show-error? cmd)
+        (send chat append-error (cmd:show-error-message cmd))]
+       [(cmd:show-result? cmd)
+        (send chat append-result
+              (cmd:show-result-text cmd)
+              (cmd:show-result-cost-usd cmd))]
+       [(cmd:set-state? cmd)
+        (send status set-state (cmd:set-state-state cmd))]
+       [(cmd:set-tool-name? cmd)
+        (send status set-tool-name (cmd:set-tool-name-name cmd))]
+       [(cmd:set-cost? cmd)
+        (send status set-cost (cmd:set-cost-cost-usd cmd))]
+       [(cmd:set-input-enabled? cmd)
+        (send input set-enabled (cmd:set-input-enabled-enabled? cmd))]
+       [else (void)]))])
+
+;; ─── Session tab ────────────────────────────────────────────────────────────
+
 (define session-tab%
   (class vertical-panel%
     (init-field session)
     (super-new)
 
-    ;; Track whether we've seen the first assistant message
-    ;; to insert the "--- Assistant ---" separator.
-    (define in-assistant-turn? #f)
-
-    ;; ─── Child widgets ───────────────────────────────────────────────────
+    ;; ─── Child widgets ─────────────────────────────────────────────────
 
     (define input (new input-area%
                        [parent this]
-                       [on-send (λ (msg) (handle-user-send msg))]))
+                       [on-send (λ (msg) (controller-send! ctrl msg))]))
 
     (define chat (new chat-view% [parent this]))
 
     (define status (new status-bar% [parent this]))
 
-    ;; ─── Send handler ────────────────────────────────────────────────────
+    ;; ─── Controller + presenter wiring ─────────────────────────────────
 
-    (define (handle-user-send msg)
-      (send chat append-user-message msg)
-      (session-send session msg)
-      (send input set-enabled #f))
+    (define presenter (gui-presenter chat status input))
+    (define ctrl (make-controller session presenter))
 
-    ;; ─── Event drain timer ───────────────────────────────────────────────
-
-    (define events-ch (session-events session))
+    ;; ─── Event drain timer ─────────────────────────────────────────────
 
     (define timer
       (new timer%
-           [notify-callback (λ () (drain-events))]
+           [notify-callback (λ () (controller-drain! ctrl))]
            [interval 50]))
 
-    (define (drain-events)
-      (let loop ()
-        (define evt (async-channel-try-get events-ch))
-        (when evt
-          (dispatch-event evt)
-          (loop))))
-
-    ;; ─── Event dispatch ──────────────────────────────────────────────────
-
-    (define (dispatch-event evt)
-      (cond
-        [(event:init? evt)
-         (send status set-state 'idle)]
-
-        [(event:text-delta? evt)
-         (unless in-assistant-turn?
-           (send chat begin-assistant-message)
-           (set! in-assistant-turn? #t))
-         (send chat append-assistant-text (event:text-delta-text evt))
-         (send status set-state 'working)]
-
-        [(event:tool-start? evt)
-         (send chat append-tool-notification
-               (event:tool-start-tool-name evt)
-               "started")
-         (send status set-state 'tool-active)
-         (send status set-tool-name (event:tool-start-tool-name evt))]
-
-        [(event:tool-end? evt)
-         (send status set-state 'working)
-         (send status set-tool-name #f)]
-
-        [(event:assistant-message? evt)
-         ;; Complete assistant message — if we didn't stream deltas,
-         ;; display the full text from content blocks.
-         (unless in-assistant-turn?
-           (send chat begin-assistant-message)
-           (for ([block (event:assistant-message-content evt)])
-             (when (and (hash? block)
-                        (equal? (hash-ref block 'type #f) "text"))
-               (send chat append-assistant-text (hash-ref block 'text "")))))
-         ;; Reset for next turn.
-         (set! in-assistant-turn? #f)
-         (send status set-state 'idle)
-         (send input set-enabled #t)]
-
-        [(event:result? evt)
-         (send chat append-result
-               (event:result-text evt)
-               (event:result-cost-usd evt))
-         (send status set-state 'idle)
-         (when (event:result-cost-usd evt)
-           (send status set-cost (event:result-cost-usd evt)))
-         (send input set-enabled #t)
-         (set! in-assistant-turn? #f)]
-
-        [(event:error? evt)
-         (send chat append-error (event:error-message evt))
-         (send status set-state 'error)
-         (send input set-enabled #t)
-         (set! in-assistant-turn? #f)]
-
-        [else (void)]))
-
-    ;; ─── Theme ───────────────────────────────────────────────────────────
+    ;; ─── Theme ─────────────────────────────────────────────────────────
 
     (define/public (apply-theme)
       (send chat apply-theme)
       (send input apply-theme))
 
-    ;; ─── Cleanup ─────────────────────────────────────────────────────────
+    ;; ─── Cleanup ───────────────────────────────────────────────────────
 
     (define/public (stop)
       (send timer stop)

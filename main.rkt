@@ -4,15 +4,21 @@
 ;; This module re-exports the public API and provides the CLI entry point.
 
 (require "private/session.rkt"
-         "private/event.rkt")
+         "private/event.rkt"
+         "private/presenter.rkt"
+         "private/controller.rkt")
 
 (provide (all-from-out "private/session.rkt")
-         (all-from-out "private/event.rkt"))
+         (all-from-out "private/event.rkt")
+         (all-from-out "private/presenter.rkt")
+         (all-from-out "private/controller.rkt"))
 
 (module+ test
   (require rackunit
            "private/event.rkt"
-           "private/session.rkt")
+           "private/session.rkt"
+           "private/presenter.rkt"
+           "private/controller.rkt")
 
   (check-true (procedure? session-send))
   (check-true (procedure? session-state))
@@ -20,7 +26,18 @@
   (check-true (procedure? session-stop))
   (check-true (procedure? session-id))
   (check-true (procedure? session-info))
-  (check-true (procedure? session-event?)))
+  (check-true (procedure? session-event?))
+
+  ;; Presenter exports
+  (check-true (procedure? presenter?))
+  (check-true (procedure? present!))
+  (check-true (procedure? cmd:show-user-message))
+  (check-true (procedure? cmd:set-state))
+
+  ;; Controller exports
+  (check-true (procedure? make-controller))
+  (check-true (procedure? controller-drain!))
+  (check-true (procedure? controller-send!)))
 
 (module+ main
   (require racket/class
