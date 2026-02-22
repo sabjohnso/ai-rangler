@@ -42,7 +42,13 @@
     (define/public (append-code-text text)
       (record! calls 'append-code-text text))
     (define/public (end-code-block)
-      (record! calls 'end-code-block))))
+      (record! calls 'end-code-block))
+    (define/public (begin-table text)
+      (record! calls 'begin-table text))
+    (define/public (append-table-row text)
+      (record! calls 'append-table-row text))
+    (define/public (end-table)
+      (record! calls 'end-table))))
 
 (define mock-status%
   (class object%
@@ -168,6 +174,24 @@
     (present! gp (cmd:end-code-block))
     (check-equal? (send chat get-calls)
                   '((end-code-block))))
+
+  (test-case "cmd:begin-table → chat begin-table"
+    (reset-all!)
+    (present! gp (cmd:begin-table "| A | B |\n"))
+    (check-equal? (send chat get-calls)
+                  '((begin-table . ("| A | B |\n")))))
+
+  (test-case "cmd:append-table-row → chat append-table-row"
+    (reset-all!)
+    (present! gp (cmd:append-table-row "| 1 | 2 |\n"))
+    (check-equal? (send chat get-calls)
+                  '((append-table-row . ("| 1 | 2 |\n")))))
+
+  (test-case "cmd:end-table → chat end-table"
+    (reset-all!)
+    (present! gp (cmd:end-table))
+    (check-equal? (send chat get-calls)
+                  '((end-table))))
 
   (test-case "unknown command → no calls on any mock"
     (reset-all!)

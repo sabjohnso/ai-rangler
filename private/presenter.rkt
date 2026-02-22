@@ -22,7 +22,10 @@
          (struct-out cmd:set-input-enabled)
          (struct-out cmd:begin-code-block)
          (struct-out cmd:append-code-text)
-         (struct-out cmd:end-code-block))
+         (struct-out cmd:end-code-block)
+         (struct-out cmd:begin-table)
+         (struct-out cmd:append-table-row)
+         (struct-out cmd:end-table))
 
 (define-generics presenter
   (present! presenter cmd))
@@ -42,3 +45,6 @@
 (struct cmd:begin-code-block (language) #:transparent)
 (struct cmd:append-code-text (text) #:transparent)
 (struct cmd:end-code-block () #:transparent)
+(struct cmd:begin-table (text) #:transparent)
+(struct cmd:append-table-row (text) #:transparent)
+(struct cmd:end-table () #:transparent)

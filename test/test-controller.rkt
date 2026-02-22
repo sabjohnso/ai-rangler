@@ -318,3 +318,67 @@
   ;; Should have: append-code-text "code" (flushed), then result commands
   (check-pred cmd:append-code-text? (first cmds))
   (check-equal? (cmd:append-code-text-text (first cmds)) "code"))
+
+;; ─── Table handling ─────────────────────────────────────────────────────────
+
+(test-case "text-delta with complete table emits table commands"
+  (define ms (make-mock))
+  (define lp (make-lp))
+  (define ctrl (make-controller ms lp))
+  (push-and-drain! ctrl ms
+    (event:text-delta 2000 "test-1"
+                      "before\n| A | B |\n|---|---|\n| 1 | 2 |\nafter\n" 0))
+  (define cmds (lp-commands lp))
+  ;; begin-assistant-message (first delta)
+  ;; cmd:append-assistant-text "before\n" (prose before table)
+  ;; cmd:begin-table (header)
+  ;; cmd:append-table-row (separator)
+  ;; cmd:append-table-row (data)
+  ;; cmd:end-table
+  ;; cmd:append-assistant-text "after\n" (prose after table)
+  ;; cmd:set-state 'working
+  (check-pred cmd:begin-assistant-message? (first cmds))
+  (check-pred cmd:append-assistant-text? (second cmds))
+  (check-equal? (cmd:append-assistant-text-text (second cmds)) "before\n")
+  (check-pred cmd:begin-table? (third cmds))
+  (check-pred cmd:append-table-row? (fourth cmds))
+  (check-pred cmd:append-table-row? (fifth cmds))
+  (check-pred cmd:end-table? (sixth cmds))
+  (check-pred cmd:append-assistant-text? (seventh cmds))
+  (check-equal? (cmd:append-assistant-text-text (seventh cmds)) "after\n"))
+
+(test-case "table in code block is NOT detected as table"
+  (define ms (make-mock))
+  (define lp (make-lp))
+  (define ctrl (make-controller ms lp))
+  (push-and-drain! ctrl ms
+    (event:text-delta 2000 "test-1"
+                      "```\n| A | B |\n|---|---|\n| 1 | 2 |\n```\n" 0))
+  (define cmds (lp-commands lp))
+  ;; Should emit code-block commands, NOT table commands
+  (check-false (for/or ([cmd (in-list cmds)])
+                 (or (cmd:begin-table? cmd)
+                     (cmd:append-table-row? cmd)
+                     (cmd:end-table? cmd))))
+  ;; Should have begin-code-block and end-code-block
+  (check-true (for/or ([cmd (in-list cmds)])
+                (cmd:begin-code-block? cmd)))
+  (check-true (for/or ([cmd (in-list cmds)])
+                (cmd:end-code-block? cmd))))
+
+(test-case "table state flushes at turn end"
+  (define ms (make-mock))
+  (define lp (make-lp))
+  (define ctrl (make-controller ms lp))
+  ;; Start a table but don't end it with non-table line
+  (push-and-drain! ctrl ms
+    (event:text-delta 2000 "test-1" "| H |\n|---|\n| data |" 0))
+  (lp-reset! lp)
+  ;; Turn end should flush pending table
+  (push-and-drain! ctrl ms
+    (event:result 9000 "test-1" #f "Done." 0.01
+                  (hasheq 'input_tokens 10 'output_tokens 5) 1000 1))
+  (define cmds (lp-commands lp))
+  ;; Should have table-end (flushed) before result commands
+  (check-true (for/or ([cmd (in-list cmds)])
+                (cmd:end-table? cmd))))

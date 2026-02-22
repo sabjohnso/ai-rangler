@@ -12,8 +12,10 @@
 
 (require racket/class
          racket/gui/base
+         racket/string
          "theme.rkt"
-         "../highlighter.rkt")
+         "../highlighter.rkt"
+         "../table-tracker.rkt")
 
 (provide chat-view%)
 
@@ -161,6 +163,11 @@
     (define code-block-start #f)      ; editor position where code content began
     (define code-block-language #f)   ; language string or #f
 
+    ;; ─── Table state ────────────────────────────────────────────────────
+
+    (define table-start-pos #f)       ; editor position where table began
+    (define table-rows '())           ; accumulated raw row strings
+
     ;; ─── Append helpers ──────────────────────────────────────────────────
 
     (define (append-styled text style)
@@ -235,6 +242,44 @@
       (insert-fence-separator! #f)
       (set! code-block-start #f)
       (set! code-block-language #f))
+
+    (define/public (begin-table text)
+      ;; Record start position, insert raw header with code-style, accumulate
+      (set! table-start-pos (send editor last-position))
+      (set! table-rows (list text))
+      (append-styled text code-style))
+
+    (define/public (append-table-row text)
+      ;; Insert raw row with code-style, accumulate
+      (set! table-rows (append table-rows (list text)))
+      (append-styled text code-style))
+
+    (define/public (end-table)
+      (when table-start-pos
+        (send editor begin-edit-sequence)
+        ;; Delete the raw text we inserted during streaming
+        (define current-end (send editor last-position))
+        (send editor delete table-start-pos current-end)
+        ;; Parse the raw rows (strip trailing newlines for format-table)
+        (define raw-rows
+          (for/list ([r (in-list table-rows)])
+            (define s (string-trim r))
+            s))
+        ;; Format with computed column widths
+        (define formatted (format-table raw-rows))
+        ;; Insert formatted text at the same position
+        (define insert-pos table-start-pos)
+        (send editor insert formatted insert-pos)
+        (define new-end (send editor last-position))
+        ;; Apply code-style for foreground
+        (send editor change-style code-style insert-pos new-end)
+        ;; Register range for full-width background
+        (send editor add-code-range! insert-pos new-end)
+        (send editor end-edit-sequence)
+        (scroll-to-end)
+        ;; Reset state
+        (set! table-start-pos #f)
+        (set! table-rows '())))
 
     (define/public (append-tool-notification name action)
       (append-styled (format "\n[~a: ~a]\n" name action) tool-style))

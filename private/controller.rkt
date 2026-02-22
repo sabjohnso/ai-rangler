@@ -8,7 +8,8 @@
          "session.rkt"
          "event.rkt"
          "presenter.rkt"
-         "fence-tracker.rkt")
+         "fence-tracker.rkt"
+         "table-tracker.rkt")
 
 (provide make-controller
          controller-drain!
@@ -16,7 +17,8 @@
 
 ;; ─── Controller struct ──────────────────────────────────────────────────────
 
-(struct controller (session presenter events-ch in-turn-box fence-state-box)
+(struct controller (session presenter events-ch in-turn-box
+                            fence-state-box table-state-box)
   #:transparent)
 
 (define (make-controller session presenter)
@@ -24,7 +26,8 @@
               presenter
               (session-events session)
               (box #f)
-              (box fence-state-init)))
+              (box fence-state-init)
+              (box table-state-init)))
 
 ;; ─── Send a user message ────────────────────────────────────────────────────
 
@@ -44,13 +47,28 @@
 
 ;; ─── Segment → command dispatch ───────────────────────────────────────────────
 
+;; Emit table-tracked presenter commands for a prose segment.
+(define (emit-prose! p ts-box text)
+  (define-values (tsegs new-tstate) (table-track (unbox ts-box) text))
+  (set-box! ts-box new-tstate)
+  (for ([seg (in-list tsegs)])
+    (define tag (car seg))
+    (define txt (cdr seg))
+    (case tag
+      [(prose)       (present! p (cmd:append-assistant-text txt))]
+      [(table-start) (present! p (cmd:begin-table txt))]
+      [(table-row)   (present! p (cmd:append-table-row txt))]
+      [(table-end)   (present! p (cmd:end-table))])))
+
 ;; Emit presenter commands for a list of tagged segments from fence-track/flush.
-(define (emit-segments! p segments)
+(define (emit-segments! ctrl segments)
+  (define p (controller-presenter ctrl))
+  (define ts-box (controller-table-state-box ctrl))
   (for ([seg (in-list segments)])
     (define tag (car seg))
     (define text (cdr seg))
     (case tag
-      [(prose)       (present! p (cmd:append-assistant-text text))]
+      [(prose)       (emit-prose! p ts-box text)]
       [(code)        (present! p (cmd:append-code-text text))]
       [(fence-open)  (present! p (cmd:begin-code-block text))]
       [(fence-close) (present! p (cmd:end-code-block))])))
@@ -60,7 +78,22 @@
   (define fs-box (controller-fence-state-box ctrl))
   (define-values (segs new-state) (fence-flush (unbox fs-box)))
   (set-box! fs-box new-state)
-  (emit-segments! (controller-presenter ctrl) segs))
+  (emit-segments! ctrl segs))
+
+;; Flush table state and emit any pending segments.
+(define (flush-table! ctrl)
+  (define ts-box (controller-table-state-box ctrl))
+  (define-values (tsegs new-state) (table-flush (unbox ts-box)))
+  (set-box! ts-box new-state)
+  (define p (controller-presenter ctrl))
+  (for ([seg (in-list tsegs)])
+    (define tag (car seg))
+    (define txt (cdr seg))
+    (case tag
+      [(prose)       (present! p (cmd:append-assistant-text txt))]
+      [(table-start) (present! p (cmd:begin-table txt))]
+      [(table-row)   (present! p (cmd:append-table-row txt))]
+      [(table-end)   (present! p (cmd:end-table))])))
 
 ;; ─── Event dispatch ─────────────────────────────────────────────────────────
 
@@ -81,7 +114,7 @@
      (define-values (segs new-state)
        (fence-track (unbox fs-box) (event:text-delta-text evt)))
      (set-box! fs-box new-state)
-     (emit-segments! p segs)
+     (emit-segments! ctrl segs)
      (present! p (cmd:set-state 'working))]
 
     [(event:tool-start? evt)
@@ -105,18 +138,19 @@
            (define-values (segs new-state)
              (fence-track (unbox fs-box) (hash-ref block 'text "")))
            (set-box! fs-box new-state)
-           (emit-segments! p segs))))
-     ;; Flush any pending fence buffer (from deltas or content blocks)
-     ;; before resetting state. Without this, partial lines buffered by
-     ;; fence-track (text without trailing newline) would be silently lost.
+           (emit-segments! ctrl segs))))
+     ;; Flush any pending fence/table buffers before resetting state.
      (flush-fence! ctrl)
+     (flush-table! ctrl)
      (set-box! (controller-in-turn-box ctrl) #f)
      (set-box! (controller-fence-state-box ctrl) fence-state-init)
+     (set-box! (controller-table-state-box ctrl) table-state-init)
      (present! p (cmd:set-state 'idle))
      (present! p (cmd:set-input-enabled #t))]
 
     [(event:result? evt)
      (flush-fence! ctrl)
+     (flush-table! ctrl)
      (present! p (cmd:show-result (event:result-text evt)
                                   (event:result-cost-usd evt)))
      (present! p (cmd:set-state 'idle))
@@ -124,14 +158,17 @@
        (present! p (cmd:set-cost (event:result-cost-usd evt))))
      (present! p (cmd:set-input-enabled #t))
      (set-box! (controller-in-turn-box ctrl) #f)
-     (set-box! (controller-fence-state-box ctrl) fence-state-init)]
+     (set-box! (controller-fence-state-box ctrl) fence-state-init)
+     (set-box! (controller-table-state-box ctrl) table-state-init)]
 
     [(event:error? evt)
      (flush-fence! ctrl)
+     (flush-table! ctrl)
      (present! p (cmd:show-error (event:error-message evt)))
      (present! p (cmd:set-state 'error))
      (present! p (cmd:set-input-enabled #t))
      (set-box! (controller-in-turn-box ctrl) #f)
-     (set-box! (controller-fence-state-box ctrl) fence-state-init)]
+     (set-box! (controller-fence-state-box ctrl) fence-state-init)
+     (set-box! (controller-table-state-box ctrl) table-state-init)]
 
     [else (void)]))

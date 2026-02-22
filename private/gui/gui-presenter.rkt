@@ -50,4 +50,10 @@
         (send chat append-code-text (cmd:append-code-text-text cmd))]
        [(cmd:end-code-block? cmd)
         (send chat end-code-block)]
+       [(cmd:begin-table? cmd)
+        (send chat begin-table (cmd:begin-table-text cmd))]
+       [(cmd:append-table-row? cmd)
+        (send chat append-table-row (cmd:append-table-row-text cmd))]
+       [(cmd:end-table? cmd)
+        (send chat end-table)]
        [else (void)]))])
