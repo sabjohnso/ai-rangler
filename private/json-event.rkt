@@ -43,6 +43,7 @@
   (case evt-type
     [("content_block_delta") (translate-delta evt now session-id)]
     [("content_block_start") (translate-block-start evt now session-id)]
+    [("content_block_stop")  (translate-block-stop evt now session-id)]
     [else (event:raw now session-id j)]))
 
 (define (translate-delta evt now session-id)
@@ -65,6 +66,10 @@
                        (hash-ref block 'name "")
                        (hash-ref block 'input (hasheq)))]
     [else (event:raw now session-id (hash-set evt 'source "content_block_start"))]))
+
+(define (translate-block-stop evt now session-id)
+  (define index (hash-ref evt 'index 0))
+  (event:tool-end now session-id (number->string index)))
 
 (define (translate-result j now session-id)
   (event:result now

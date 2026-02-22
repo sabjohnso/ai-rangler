@@ -57,7 +57,7 @@
   (check-equal? (event:tool-start-tool-name e) "Read")
   (check-equal? (event:tool-start-tool-use-id e) "toolu_01"))
 
-;; ─── stream_event: content_block_stop (after tool_use) ───────────────────────
+;; ─── stream_event: content_block_start text → raw ───────────────────────────
 
 (test-case "stream_event content_block_start text → no tool event"
   (define j (hasheq 'type "stream_event"
@@ -68,6 +68,16 @@
   ;; text block starts are not interesting as tool events
   (define e (json->session-event j "s1"))
   (check-pred event:raw? e))
+
+;; ─── stream_event: content_block_stop ────────────────────────────────────────
+
+(test-case "stream_event content_block_stop → event:tool-end"
+  (define j (hasheq 'type "stream_event"
+                    'event (hasheq 'type "content_block_stop"
+                                   'index 1)))
+  (define e (json->session-event j "s1"))
+  (check-pred event:tool-end? e)
+  (check-equal? (event:tool-end-tool-use-id e) "1"))
 
 ;; ─── result message ──────────────────────────────────────────────────────────
 

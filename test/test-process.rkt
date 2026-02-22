@@ -14,13 +14,21 @@
               #:command (list (find-executable-path "racket") (path->string mock-claude))))
   (check-true (claude-process? cp))
   (check-true (claude-process-running? cp))
-  ;; Read the three lines of output
-  (define line1 (read-json (claude-process-stdout cp)))
-  (check-equal? (hash-ref line1 'type) "system")
-  (define line2 (read-json (claude-process-stdout cp)))
-  (check-equal? (hash-ref line2 'type) "assistant")
-  (define line3 (read-json (claude-process-stdout cp)))
-  (check-equal? (hash-ref line3 'type) "result")
+  ;; Read all output lines; mock emits system, stream_events, assistant, result
+  (define (read-all-lines port)
+    (let loop ([acc '()])
+      (define j (read-json port))
+      (if (eof-object? j)
+          (reverse acc)
+          (loop (cons j acc)))))
+  (define lines (read-all-lines (claude-process-stdout cp)))
+  (check-true (>= (length lines) 3) "expected at least 3 output lines")
+  (check-equal? (hash-ref (car lines) 'type) "system")
+  ;; Find assistant and result in the output
+  (check-not-false
+   (for/first ([l (in-list lines)] #:when (equal? (hash-ref l 'type #f) "assistant")) l))
+  (check-not-false
+   (for/first ([l (in-list lines)] #:when (equal? (hash-ref l 'type #f) "result")) l))
   ;; Process should exit cleanly
   (claude-process-wait cp)
   (check-false (claude-process-running? cp)))

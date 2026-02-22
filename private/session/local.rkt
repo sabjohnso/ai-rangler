@@ -7,19 +7,22 @@
 
 (require racket/async-channel
          racket/port
+         racket/string
          json
          "../session.rkt"
          "../event.rkt"
          "../ndjson.rkt"
          "../json-event.rkt"
-         "../process.rkt")
+         "../process.rkt"
+         "../stderr-ring.rkt")
 
 (provide make-local-session)
 
 ;; ─── Local session struct ────────────────────────────────────────────────────
 
 (struct local-session (id state-box events-ch process-box
-                       reader-thread-box stopping?-box)
+                       reader-thread-box stopping?-box
+                       stderr-ring)
   #:methods gen:session
   [(define (session-send s msg)
      (local-session-do-send s msg))
@@ -40,7 +43,8 @@
 (define (make-local-session #:command [command #f]
                             #:session-id [sid (gensym "local-")]
                             #:cwd [cwd #f]
-                            #:claude-path [claude-path #f])
+                            #:claude-path [claude-path #f]
+                            #:stderr-buffer-lines [stderr-buf-lines 50])
   (define state-box (box 'init))
   (define events-ch (make-async-channel))
   (define cp
@@ -53,10 +57,12 @@
   (define process-box (box cp))
   (define reader-thread-box (box #f))
   (define stopping?-box (box #f))
+  (define ring (make-stderr-ring #:max-lines stderr-buf-lines))
 
   (define s (local-session (if (symbol? sid) (symbol->string sid) sid)
                            state-box events-ch process-box
-                           reader-thread-box stopping?-box))
+                           reader-thread-box stopping?-box
+                           ring))
 
   ;; Start the reader thread
   (set-box! reader-thread-box (start-reader s))
@@ -74,8 +80,12 @@
   (define state-box (local-session-state-box s))
   (define events-ch (local-session-events-ch s))
   (define stopping?-box (local-session-stopping?-box s))
+  (define ring (local-session-stderr-ring s))
   (define stdout (claude-process-stdout cp))
   (define stderr (claude-process-stderr cp))
+
+  ;; Drain stderr continuously so the pipe buffer never fills
+  (start-stderr-drain ring stderr)
 
   (thread
    (λ ()
@@ -88,18 +98,17 @@
             [(unbox stopping?-box)
              (set-box! state-box 'stopped)]
             [else
-             ;; Unexpected exit — read stderr for diagnostics
-             (define err-text (port->string stderr))
+             ;; Unexpected exit — use buffered stderr lines for diagnostics
+             (define err-lines (stderr-ring-lines ring))
+             (define err-text (string-join err-lines "\n"))
              (define exit-code (claude-process-wait cp))
              (define has-error?
                (or (not (equal? exit-code 0))
-                   (and (string? err-text)
-                        (positive? (string-length err-text)))))
+                   (positive? (string-length err-text))))
              (cond
                [has-error?
                 (define msg
-                  (if (and (string? err-text)
-                           (positive? (string-length err-text)))
+                  (if (positive? (string-length err-text))
                       (format "Process exited (~a): ~a" exit-code err-text)
                       (format "Process exited with code ~a" exit-code)))
                 (define evt (event:error (current-inexact-milliseconds) sid msg))
