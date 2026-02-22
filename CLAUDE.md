@@ -45,4 +45,4 @@ raco docs ai-rangler
 
 ## CI
 
-GitHub Actions runs on push/PR against Racket `stable` and `current` versions, both BC and CS variants. Current version builds are experimental (allowed to fail).
+GitHub Actions runs on push/PR against Racket `stable` and `current` versions (CS only). Current version builds are experimental (allowed to fail).

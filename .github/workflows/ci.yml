@@ -2,14 +2,13 @@ on: [push, pull_request]
 name: CI
 jobs:
   build:
-    name: "Build on Racket '${{ matrix.racket-version }}' (${{ matrix.racket-variant }})"
+    name: "Build on Racket '${{ matrix.racket-version }}' (CS)"
     runs-on: ubuntu-latest
     continue-on-error: ${{ matrix.experimental || false }}
     strategy:
       fail-fast: false
       matrix:
         racket-version: ["stable", "current"]
-        racket-variant: ["BC", "CS"]
         include:
           - racket-version: current
             experimental: true
@@ -19,7 +18,7 @@ jobs:
         with:
           architecture: x64
           distribution: full
-          variant: ${{ matrix.racket-variant }}
+          variant: CS
           version: ${{ matrix.racket-version }}
       - name: Installing ai-rangler and its dependencies
         run: raco pkg install --no-docs --auto --name ai-rangler
