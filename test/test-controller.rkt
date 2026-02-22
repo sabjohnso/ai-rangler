@@ -84,12 +84,13 @@
   (define ms (make-mock))
   (define lp (make-lp))
   (define ctrl (make-controller ms lp))
-  (push-and-drain! ctrl ms (event:text-delta 2000 "test-1" "Hello" 0))
+  ;; Text ending with \n is emitted immediately; partial lines are buffered.
+  (push-and-drain! ctrl ms (event:text-delta 2000 "test-1" "Hello\n" 0))
   (define cmds (lp-commands lp))
   (check-equal? (length cmds) 3)
   (check-pred cmd:begin-assistant-message? (first cmds))
   (check-pred cmd:append-assistant-text? (second cmds))
-  (check-equal? (cmd:append-assistant-text-text (second cmds)) "Hello")
+  (check-equal? (cmd:append-assistant-text-text (second cmds)) "Hello\n")
   (check-pred cmd:set-state? (third cmds))
   (check-equal? (cmd:set-state-state (third cmds)) 'working))
 
@@ -99,13 +100,13 @@
   (define ms (make-mock))
   (define lp (make-lp))
   (define ctrl (make-controller ms lp))
-  (push-and-drain! ctrl ms (event:text-delta 2000 "test-1" "Hello" 0))
+  (push-and-drain! ctrl ms (event:text-delta 2000 "test-1" "Hello\n" 0))
   (lp-reset! lp)
-  (push-and-drain! ctrl ms (event:text-delta 2001 "test-1" " world" 0))
+  (push-and-drain! ctrl ms (event:text-delta 2001 "test-1" " world\n" 0))
   (define cmds (lp-commands lp))
   (check-equal? (length cmds) 2)
   (check-pred cmd:append-assistant-text? (first cmds))
-  (check-equal? (cmd:append-assistant-text-text (first cmds)) " world")
+  (check-equal? (cmd:append-assistant-text-text (first cmds)) " world\n")
   (check-pred cmd:set-state? (second cmds))
   (check-equal? (cmd:set-state-state (second cmds)) 'working))
 
@@ -168,7 +169,7 @@
   (define lp (make-lp))
   (define ctrl (make-controller ms lp))
   ;; First delta opens the turn.
-  (push-and-drain! ctrl ms (event:text-delta 2000 "test-1" "streamed" 0))
+  (push-and-drain! ctrl ms (event:text-delta 2000 "test-1" "streamed\n" 0))
   (lp-reset! lp)
   ;; assistant-message arrives after deltas.
   (define blocks (list (hasheq 'type "text" 'text "streamed")))
@@ -180,6 +181,29 @@
   (check-equal? (cmd:set-state-state (first cmds)) 'idle)
   (check-pred cmd:set-input-enabled? (second cmds))
   (check-true (cmd:set-input-enabled-enabled? (second cmds))))
+
+;; ─── event:assistant-message (after deltas, pending fence buffer) ─────────
+
+(test-case "assistant-message after deltas flushes pending fence buffer"
+  (define ms (make-mock))
+  (define lp (make-lp))
+  (define ctrl (make-controller ms lp))
+  ;; Delta with no trailing newline — text is buffered by fence-track.
+  (push-and-drain! ctrl ms (event:text-delta 2000 "test-1" "partial text" 0))
+  (lp-reset! lp)
+  ;; Assistant-message should flush the buffered text before resetting.
+  (define blocks (list (hasheq 'type "text" 'text "partial text")))
+  (push-and-drain! ctrl ms (event:assistant-message 4000 "test-1" blocks "opus"))
+  (define cmds (lp-commands lp))
+  ;; Should have: append-assistant-text "partial text" (flushed),
+  ;; set-state idle, set-input-enabled #t
+  (check-equal? (length cmds) 3)
+  (check-pred cmd:append-assistant-text? (first cmds))
+  (check-equal? (cmd:append-assistant-text-text (first cmds)) "partial text")
+  (check-pred cmd:set-state? (second cmds))
+  (check-equal? (cmd:set-state-state (second cmds)) 'idle)
+  (check-pred cmd:set-input-enabled? (third cmds))
+  (check-true (cmd:set-input-enabled-enabled? (third cmds))))
 
 ;; ─── event:result ───────────────────────────────────────────────────────────
 
@@ -227,9 +251,70 @@
   (define ch (mock-session-events-ch ms))
   ;; Queue up 3 events before draining.
   (async-channel-put ch (event:init 1000 "test-1" "test-1" '() "m"))
-  (async-channel-put ch (event:text-delta 2000 "test-1" "Hi" 0))
+  (async-channel-put ch (event:text-delta 2000 "test-1" "Hi\n" 0))
   (async-channel-put ch (event:tool-start 3000 "test-1" "t1" "Bash" (hasheq)))
   (controller-drain! ctrl)
   (define cmds (lp-commands lp))
   ;; init→1, first delta→3, tool-start→3 = 7 commands
   (check-equal? (length cmds) 7))
+
+;; ─── Code fence handling ──────────────────────────────────────────────────────
+
+(test-case "text-delta with code fence emits begin/end-code-block commands"
+  (define ms (make-mock))
+  (define lp (make-lp))
+  (define ctrl (make-controller ms lp))
+  ;; A delta containing a complete fenced code block
+  (push-and-drain! ctrl ms
+    (event:text-delta 2000 "test-1"
+                      "before\n```racket\n(+ 1 2)\n```\nafter\n" 0))
+  (define cmds (lp-commands lp))
+  ;; begin-assistant-message (first delta)
+  ;; cmd:append-assistant-text "before\n" (prose)
+  ;; cmd:begin-code-block "racket"
+  ;; cmd:append-code-text "(+ 1 2)\n"
+  ;; cmd:end-code-block
+  ;; cmd:append-assistant-text "after\n" (prose)
+  ;; cmd:set-state 'working
+  (check-pred cmd:begin-assistant-message? (first cmds))
+  (check-pred cmd:append-assistant-text? (second cmds))
+  (check-equal? (cmd:append-assistant-text-text (second cmds)) "before\n")
+  (check-pred cmd:begin-code-block? (third cmds))
+  (check-equal? (cmd:begin-code-block-language (third cmds)) "racket")
+  (check-pred cmd:append-code-text? (fourth cmds))
+  (check-equal? (cmd:append-code-text-text (fourth cmds)) "(+ 1 2)\n")
+  (check-pred cmd:end-code-block? (fifth cmds))
+  (check-pred cmd:append-assistant-text? (sixth cmds))
+  (check-equal? (cmd:append-assistant-text-text (sixth cmds)) "after\n")
+  (check-pred cmd:set-state? (seventh cmds)))
+
+(test-case "text-delta with prose only emits append-assistant-text"
+  (define ms (make-mock))
+  (define lp (make-lp))
+  (define ctrl (make-controller ms lp))
+  (push-and-drain! ctrl ms
+    (event:text-delta 2000 "test-1" "just plain text\n" 0))
+  (define cmds (lp-commands lp))
+  ;; begin-assistant-message, append-assistant-text, set-state working
+  (check-equal? (length cmds) 3)
+  (check-pred cmd:begin-assistant-message? (first cmds))
+  (check-pred cmd:append-assistant-text? (second cmds))
+  (check-equal? (cmd:append-assistant-text-text (second cmds)) "just plain text\n")
+  (check-pred cmd:set-state? (third cmds)))
+
+(test-case "fence state resets at turn end"
+  (define ms (make-mock))
+  (define lp (make-lp))
+  (define ctrl (make-controller ms lp))
+  ;; Start a code block but don't close it
+  (push-and-drain! ctrl ms
+    (event:text-delta 2000 "test-1" "```racket\ncode" 0))
+  (lp-reset! lp)
+  ;; Turn end should flush pending code
+  (push-and-drain! ctrl ms
+    (event:result 9000 "test-1" #f "Done." 0.01
+                  (hasheq 'input_tokens 10 'output_tokens 5) 1000 1))
+  (define cmds (lp-commands lp))
+  ;; Should have: append-code-text "code" (flushed), then result commands
+  (check-pred cmd:append-code-text? (first cmds))
+  (check-equal? (cmd:append-code-text-text (first cmds)) "code"))

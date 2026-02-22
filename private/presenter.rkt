@@ -19,7 +19,10 @@
          (struct-out cmd:set-state)
          (struct-out cmd:set-tool-name)
          (struct-out cmd:set-cost)
-         (struct-out cmd:set-input-enabled))
+         (struct-out cmd:set-input-enabled)
+         (struct-out cmd:begin-code-block)
+         (struct-out cmd:append-code-text)
+         (struct-out cmd:end-code-block))
 
 (define-generics presenter
   (present! presenter cmd))
@@ -36,3 +39,6 @@
 (struct cmd:set-tool-name (name) #:transparent)
 (struct cmd:set-cost (cost-usd) #:transparent)
 (struct cmd:set-input-enabled (enabled?) #:transparent)
+(struct cmd:begin-code-block (language) #:transparent)
+(struct cmd:append-code-text (text) #:transparent)
+(struct cmd:end-code-block () #:transparent)

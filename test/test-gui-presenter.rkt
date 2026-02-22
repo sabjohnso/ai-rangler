@@ -36,7 +36,13 @@
     (define/public (append-error message)
       (record! calls 'append-error message))
     (define/public (append-result text cost-usd)
-      (record! calls 'append-result text cost-usd))))
+      (record! calls 'append-result text cost-usd))
+    (define/public (begin-code-block language)
+      (record! calls 'begin-code-block language))
+    (define/public (append-code-text text)
+      (record! calls 'append-code-text text))
+    (define/public (end-code-block)
+      (record! calls 'end-code-block))))
 
 (define mock-status%
   (class object%
@@ -144,6 +150,24 @@
                   '((set-enabled . (#t))))
     (check-equal? (send chat   get-calls) '())
     (check-equal? (send status get-calls) '()))
+
+  (test-case "cmd:begin-code-block → chat begin-code-block"
+    (reset-all!)
+    (present! gp (cmd:begin-code-block "racket"))
+    (check-equal? (send chat get-calls)
+                  '((begin-code-block . ("racket")))))
+
+  (test-case "cmd:append-code-text → chat append-code-text"
+    (reset-all!)
+    (present! gp (cmd:append-code-text "(+ 1 2)"))
+    (check-equal? (send chat get-calls)
+                  '((append-code-text . ("(+ 1 2)")))))
+
+  (test-case "cmd:end-code-block → chat end-code-block"
+    (reset-all!)
+    (present! gp (cmd:end-code-block))
+    (check-equal? (send chat get-calls)
+                  '((end-code-block))))
 
   (test-case "unknown command → no calls on any mock"
     (reset-all!)

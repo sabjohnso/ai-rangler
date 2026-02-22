@@ -44,4 +44,10 @@
         (send status set-cost (cmd:set-cost-cost-usd cmd))]
        [(cmd:set-input-enabled? cmd)
         (send input set-enabled (cmd:set-input-enabled-enabled? cmd))]
+       [(cmd:begin-code-block? cmd)
+        (send chat begin-code-block (cmd:begin-code-block-language cmd))]
+       [(cmd:append-code-text? cmd)
+        (send chat append-code-text (cmd:append-code-text-text cmd))]
+       [(cmd:end-code-block? cmd)
+        (send chat end-code-block)]
        [else (void)]))])

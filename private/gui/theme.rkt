@@ -9,21 +9,52 @@
          racket/string)
 
 (provide (struct-out theme)
+         (struct-out code-colors)
          light-theme
          dark-theme
          current-theme
          parse-color)
 
+(struct code-colors
+  (symbol string comment constant parenthesis keyword error default)
+  #:transparent)
+
 (struct theme (name background user-color assistant-color
-               tool-color error-color separator-color) #:transparent)
+               tool-color error-color separator-color
+               code-background code-colors
+               fence-background fence-color) #:transparent)
+
+(define light-code-colors
+  (code-colors "#0000ff"    ; symbol — blue
+               "#a31515"    ; string — dark red
+               "#008000"    ; comment — green
+               "#098658"    ; constant — teal
+               "#000000"    ; parenthesis — black
+               "#7f0055"    ; keyword — purple
+               "#ff0000"    ; error — red
+               "#333333"))  ; default — dark grey
+
+(define dark-code-colors
+  (code-colors "#9cdcfe"    ; symbol — light blue
+               "#ce9178"    ; string — light brown
+               "#6a9955"    ; comment — green
+               "#b5cea8"    ; constant — light green
+               "#d4d4d4"    ; parenthesis — grey
+               "#c586c0"    ; keyword — pink
+               "#f44747"    ; error — red
+               "#d4d4d4"))  ; default — grey
 
 (define light-theme
   (theme "Light" "white" "blue" "black"
-         "dark green" "red" "gray"))
+         "dark green" "red" "gray"
+         "#f5f5f5" light-code-colors
+         "#e0e0e0" "#999999"))
 
 (define dark-theme
   (theme "Dark" "#1e1e1e" "#6cb4ee" "#d4d4d4"
-         "#4ec9b0" "#f44747" "#6a6a6a"))
+         "#4ec9b0" "#f44747" "#6a6a6a"
+         "#2d2d2d" dark-code-colors
+         "#383838" "#808080"))
 
 (define current-theme (make-parameter light-theme))
 
