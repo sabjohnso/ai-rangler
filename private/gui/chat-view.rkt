@@ -17,6 +17,7 @@
 
     ;; The text editor and its canvas for display.
     (define editor (new text%))
+    (send editor auto-wrap #t)
     (define canvas (new editor-canvas%
                        [parent this]
                        [editor editor]
