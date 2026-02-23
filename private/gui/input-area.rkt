@@ -23,14 +23,16 @@
                        (when (equal? (send evt get-event-type) 'text-field-enter)
                          (do-send)))]))
 
-    ;; Match font and background to the chat view.
+    ;; Match font, foreground and background to the chat view.
     (define (apply-input-style!)
+      (define t (current-theme))
       (define ed (send text-field get-editor))
-      (send ed change-style
-            (make-object style-delta% 'change-family 'modern)
-            0 (send ed last-position))
+      (define sd (new style-delta%))
+      (send sd set-family 'modern)
+      (send sd set-delta-foreground (parse-color (theme-assistant-color t)))
+      (send ed change-style sd 0 (send ed last-position))
       (send text-field set-field-background
-            (parse-color (theme-background (current-theme)))))
+            (parse-color (theme-background t))))
 
     (apply-input-style!)
 
