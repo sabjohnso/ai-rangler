@@ -48,7 +48,8 @@
 
     (define/public (apply-theme)
       (send chat apply-theme)
-      (send input apply-theme))
+      (send input apply-theme)
+      (send status apply-theme))
 
     ;; ─── Cleanup ───────────────────────────────────────────────────────
 

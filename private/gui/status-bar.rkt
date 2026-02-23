@@ -4,7 +4,8 @@
 ;; Updated by the session-tab when events arrive.
 
 (require racket/class
-         racket/gui/base)
+         racket/gui/base
+         "theme.rkt")
 
 (provide status-bar%)
 
@@ -30,6 +31,17 @@
            [parent this]
            [label ""]
            [auto-resize #t]))
+
+    (define (apply-styles!)
+      (define t (current-theme))
+      (define fg (parse-color (theme-separator-color t)))
+      (for ([lbl (list state-label tool-label cost-label)])
+        (send lbl set-color fg)))
+
+    (apply-styles!)
+
+    (define/public (apply-theme)
+      (apply-styles!))
 
     (define/public (set-state state-sym)
       (send state-label set-label
